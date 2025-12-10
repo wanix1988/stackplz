@@ -61,7 +61,7 @@ func (this *MStack) setupManager() error {
     probes = append(probes, fork_probe)
 
     for i, uprobe_point := range this.mconf.StackUprobeConf.Points {
-        // stack hook 配置
+        // stack hook 配置 - uprobe (函数入口)
         sym := uprobe_point.Symbol
         var stack_probe *manager.Probe
         if sym == "" {
@@ -90,6 +90,39 @@ func (this *MStack) setupManager() error {
         }
         this.logger.Printf("idx:%d %s", i, uprobe_point.String())
         probes = append(probes, stack_probe)
+
+        // 如果配置了 ExitRead 或 ExitOffset，则添加 uretprobe (函数返回)
+        if uprobe_point.ExitRead || uprobe_point.ExitOffset > 0 {
+            var uretprobe_probe *manager.Probe
+            if sym == "" {
+                uretprobe_probe = &manager.Probe{
+                    Section:          fmt.Sprintf("uretprobe/stack_%d", i),
+                    EbpfFuncName:     fmt.Sprintf("uretprobe_stack_%d", i),
+                    AttachToFuncName: sym,
+                    RealFilePath:     uprobe_point.RealFilePath,
+                    BinaryPath:       uprobe_point.LibPath,
+                    NonElfOffset:     uprobe_point.NonElfOffset,
+                    UAddress:         uprobe_point.Offset + uprobe_point.ExitOffset,
+                }
+            } else {
+                // 如果有 ExitOffset，使用 ExitOffset，否则使用符号的返回地址
+                offset := uprobe_point.Offset
+                if uprobe_point.ExitOffset > 0 {
+                    offset = uprobe_point.ExitOffset
+                }
+                uretprobe_probe = &manager.Probe{
+                    Section:          fmt.Sprintf("uretprobe/stack_%d", i),
+                    EbpfFuncName:     fmt.Sprintf("uretprobe_stack_%d", i),
+                    AttachToFuncName: sym,
+                    RealFilePath:     uprobe_point.RealFilePath,
+                    BinaryPath:       uprobe_point.LibPath,
+                    NonElfOffset:     uprobe_point.NonElfOffset,
+                    UprobeOffset:     offset,
+                }
+            }
+            this.logger.Printf("idx:%d uretprobe %s", i, uprobe_point.String())
+            probes = append(probes, uretprobe_probe)
+        }
     }
 
     this.bpfManager = &manager.Manager{
@@ -396,6 +429,7 @@ func (this *MStack) initDecodeFun() error {
     }
     this.eventMaps = append(this.eventMaps, EventsMap)
     // 根据设置添加 map 不然即使不使用的map也会创建缓冲区
+    // 使用一个通用的事件处理器，根据 EventId 来区分
     uprobestackEvent := &event.UprobeEvent{}
     this.eventFuncMaps[EventsMap] = uprobestackEvent
     return nil

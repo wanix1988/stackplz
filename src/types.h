@@ -65,7 +65,10 @@ enum event_id_e
 {
     SYSCALL_ENTER = 456,
     SYSCALL_EXIT,
-    UPROBE_ENTER
+    UPROBE_ENTER,
+    UPROBE_EXIT,
+    KPROBE_ENTER,
+    KPROBE_EXIT
 };
 
 enum op_code_e

@@ -142,7 +142,7 @@ func (this *ContextEvent) ParseEvent() (IEventStruct, error) {
         switch EventId {
         case SYSCALL_ENTER, SYSCALL_EXIT:
             return nil, nil
-        case UPROBE_ENTER:
+        case UPROBE_ENTER, UPROBE_EXIT:
             return nil, nil
         default:
             this.logger.Printf("ContextEvent.ParseEvent() unsupported EventId:%d\n", EventId)

@@ -30,10 +30,32 @@ func (this *UprobeEvent) ParseEvent() (IEventStruct, error) {
         panic("...")
     }
     if data_e == nil {
-        if err := this.ParseContext(); err != nil {
+        // 先解析基础上下文以获取 EventId
+        err := this.ContextEvent.ParseContext()
+        if err != nil {
             panic(fmt.Sprintf("UprobeEvent.ParseContext() err:%v", err))
         }
-        return this, nil
+        
+        // 根据 EventId 决定返回 UprobeEvent 还是 UretprobeEvent
+        if this.EventId == UPROBE_EXIT {
+            uretprobeEvent := &UretprobeEvent{
+                ContextEvent: this.ContextEvent,
+            }
+            uretprobeEvent.SetLogger(this.logger)
+            uretprobeEvent.SetConf(this.mconf)
+            uretprobeEvent.SetRecord(this.rec)
+            if err := uretprobeEvent.ParseContext(); err != nil {
+                panic(fmt.Sprintf("UretprobeEvent.ParseContext() err:%v", err))
+            }
+            return uretprobeEvent, nil
+        } else if this.EventId == UPROBE_ENTER {
+            if err := this.ParseContext(); err != nil {
+                panic(fmt.Sprintf("UprobeEvent.ParseContext() err:%v", err))
+            }
+            return this, nil
+        } else {
+            panic(fmt.Sprintf("UprobeEvent.ParseEvent() unsupported EventId:%d", this.EventId))
+        }
     }
     return data_e, nil
 }

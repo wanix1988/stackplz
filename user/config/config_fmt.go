@@ -50,6 +50,23 @@ type UprobeFields struct {
 	ArgStr     string `json:"arg_str"`
 }
 
+type UretprobeFields struct {
+	ProbeIndex uint32 `json:"probe_index"`
+	RetValue   uint64 `json:"ret_value"`
+	LR         uint64 `json:"lr"`
+	SP         uint64 `json:"sp"`
+	PC         uint64 `json:"pc"`
+	ArgName    string `json:"arg_name"`
+	ArgStr     string `json:"arg_str"`
+}
+
+type KretprobeFields struct {
+	FuncName string `json:"func_name"`
+	RetValue uint64 `json:"ret_value"`
+	ArgName  string `json:"arg_name"`
+	ArgStr   string `json:"arg_str"`
+}
+
 type Mmap2Fields struct {
 	Pid            uint32 `json:"pid"`
 	Tid            uint32 `json:"tid"`
