@@ -90,6 +90,38 @@ func (this *MStack) setupManager() error {
         }
         this.logger.Printf("idx:%d %s", i, uprobe_point.String())
         probes = append(probes, stack_probe)
+
+        // 如果启用了 uretprobe，添加对应的 uretprobe probe
+        if uprobe_point.EnableUretprobe {
+            var uretprobe_probe *manager.Probe
+            if uprobe_point.Symbol == "" {
+                // 注意：sym 在上面可能被替换为随机字符串（仅用于满足 manager 的 AttachToFuncName 要求）
+                // 这里以 uprobe_point.Symbol 判断是否为“按地址 attach”的模式，避免误用随机符号走 symbol attach。
+                uretprobe_probe = &manager.Probe{
+                    Section:          fmt.Sprintf("uretprobe/stack_%d", i),
+                    EbpfFuncName:     fmt.Sprintf("uretprobe_stack_%d", i),
+                    AttachToFuncName: sym,
+                    RealFilePath:     uprobe_point.RealFilePath,
+                    BinaryPath:       uprobe_point.LibPath,
+                    NonElfOffset:     uprobe_point.NonElfOffset,
+                    // 这个是相对于库文件基址的偏移
+                    UAddress: uprobe_point.Offset,
+                }
+            } else {
+                uretprobe_probe = &manager.Probe{
+                    Section:          fmt.Sprintf("uretprobe/stack_%d", i),
+                    EbpfFuncName:     fmt.Sprintf("uretprobe_stack_%d", i),
+                    AttachToFuncName: sym,
+                    RealFilePath:     uprobe_point.RealFilePath,
+                    BinaryPath:       uprobe_point.LibPath,
+                    NonElfOffset:     uprobe_point.NonElfOffset,
+                    // 这个是相对于符号的偏移
+                    UprobeOffset: uprobe_point.Offset,
+                }
+            }
+            this.logger.Printf("idx:%d uretprobe %s", i, uprobe_point.String())
+            probes = append(probes, uretprobe_probe)
+        }
     }
 
     this.bpfManager = &manager.Manager{
@@ -378,12 +410,38 @@ func (this *MStack) update_stack_config() {
     }
 }
 
+func (this *MStack) update_uretprobe_stack_config() {
+    if !this.mconf.StackUprobeConf.IsEnable() {
+        return
+    }
+    map_name := "uretprobe_point_args"
+    bpf_map, err := this.FindMap(map_name)
+    if err != nil {
+        panic(fmt.Sprintf("find [%s] failed, err:%v", map_name, err))
+    }
+    for _, uprobe_point := range this.mconf.StackUprobeConf.Points {
+        if !uprobe_point.EnableUretprobe {
+            continue
+        }
+        var filter_key uint32 = uprobe_point.Index
+        filter_value := uprobe_point.GetUretConfig()
+        err := bpf_map.Update(unsafe.Pointer(&filter_key), unsafe.Pointer(&filter_value), ebpf.UpdateAny)
+        if err != nil {
+            panic(fmt.Sprintf("update [%s] failed, filter_key:%d, err:%v", map_name, filter_key, err))
+        }
+    }
+    if this.mconf.Debug {
+        this.logger.Printf("update %s success", map_name)
+    }
+}
+
 func (this *MStack) updateFilter() (err error) {
     this.update_base_config()
     this.update_common_filter()
     this.update_child_parent()
     this.update_thread_filter()
     this.update_stack_config()
+    this.update_uretprobe_stack_config()
     this.update_arg_filter()
     this.update_op_list()
     return nil

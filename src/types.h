@@ -65,7 +65,8 @@ enum event_id_e
 {
     SYSCALL_ENTER = 456,
     SYSCALL_EXIT,
-    UPROBE_ENTER
+    UPROBE_ENTER,
+    UPROBE_EXIT
 };
 
 enum op_code_e
@@ -100,7 +101,8 @@ enum op_code_e
     OP_FILTER_STRING,
     OP_SAVE_STRING,
     OP_SAVE_PTR_STRING,
-    OP_READ_STD_STRING
+    OP_READ_STD_STRING,
+    OP_READ_RET
 };
 
 enum arm64_reg_e

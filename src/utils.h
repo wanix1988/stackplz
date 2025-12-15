@@ -144,11 +144,11 @@ static __noinline u32 read_args(program_data_t* p, point_args_t* point_args, op_
                 if (op_ctx->reg_index >= REG_ARM64_MAX) {
                     return 0;
                 }
-                if (op_ctx->reg_index == 0) {
-                    op_ctx->reg_value = op_ctx->reg_0;
-                } else {
-                    op_ctx->reg_value = READ_KERN(ctx_regs->regs[op_ctx->reg_index]);
-                }
+                op_ctx->reg_value = READ_KERN(ctx_regs->regs[op_ctx->reg_index]);
+                break;
+            case OP_READ_RET:
+                // uretprobe 的返回值专用：读取 op_ctx->reg_0
+                op_ctx->reg_value = op_ctx->reg_0;
                 break;
             case OP_SAVE_REG:
                 save_to_submit_buf(p->event, (void *)&op_ctx->reg_value, sizeof(op_ctx->reg_value), op_ctx->save_index);
@@ -270,17 +270,26 @@ static __noinline u32 read_args(program_data_t* p, point_args_t* point_args, op_
             }
             case OP_READ_STD_STRING:
             {
-                // 搭配 OP_SAVE_STRING 使用 这里仅计算实际的字符串地址
-                u64 ptr = op_ctx->read_addr & 0xffffffffffff;
-                u8 value;
-                bpf_probe_read_user(&value, sizeof(value), (void*) ptr);
-                if ((value & 1) == 0) {
-                    ptr += 1;
+                // 搭配 OP_SAVE_STRING 使用：计算 std::string 实际 data 指针
+                // Android(NDK)/libc++ 常见布局（64-bit）：
+                // - short(SSO): data 在对象起始处，末字节保存 size/flag
+                // - long: 首字段为 data 指针，末字节/字段包含 flag
+                // 之前用首字节的 bit 判定并 +1，会导致 short 场景丢首字母（Hello -> ello）
+                u64 base = op_ctx->read_addr & 0xffffffffffff;
+                // libc++ std::string 在 64-bit 下大小通常为 24 bytes，末字节 offset=23
+                // 用 PTR_SIZE 推导：3个机器字大小 - 1
+                u64 last_off = (PTR_SIZE * 3) - 1;
+                u8 last = 0;
+                bpf_probe_read_user(&last, sizeof(last), (void*)(base + last_off));
+                if ((last & 0x80) != 0) {
+                    // long string：首字为 data 指针
+                    u64 data = 0;
+                    bpf_probe_read_user(&data, sizeof(data), (void*)base);
+                    op_ctx->read_addr = data;
                 } else {
-                    ptr += PTR_SIZE * 2;
-                    bpf_probe_read_user(&ptr, sizeof(ptr), (void*) ptr);
+                    // short string：data 从对象起始处开始（不做 +1）
+                    op_ctx->read_addr = base;
                 }
-                op_ctx->read_addr = ptr;
                 break;
             }
             default:

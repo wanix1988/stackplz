@@ -14,6 +14,7 @@ type PointArg struct {
 	FilterIndexList []uint32 `json:"-"`
 	PointType       uint32   `json:"-"`
 	GroupType       uint32   `json:"-"`
+	IsRet           bool     `json:"-"`
 }
 
 func (this *PointArg) GetTypeName() string {
@@ -131,7 +132,11 @@ func (this *PointArg) GetOpList() []uint32 {
 	if this.RegIndex == REG_ARM64_MAX {
 		return op_list
 	}
-	if len(this.ExtraOpList) > 0 {
+	if this.IsRet {
+		// uretprobe return value：使用 OP_READ_RET 读取 op_ctx->reg_0
+		op_list = append(op_list, argtype.OPC_READ_RET.Index)
+		op_list = append(op_list, argtype.OPC_SAVE_REG.Index)
+	} else if len(this.ExtraOpList) > 0 {
 		// 类型的最终读取地址 由 ExtraOpList 提供 记得读取之前要保存下地址
 		op_list = append(op_list, this.ExtraOpList...)
 	} else {
@@ -139,7 +144,9 @@ func (this *PointArg) GetOpList() []uint32 {
 		op_list = append(op_list, argtype.OPC_MOVE_REG_VALUE.Index)
 	}
 
-	if this.TypeIndex != STRING && this.TypeIndex != STD_STRING && !this.IsBuffer() {
+	if this.IsRet {
+		// ret 的过滤暂不支持（保持简单可靠）
+	} else if this.TypeIndex != STRING && this.TypeIndex != STD_STRING && !this.IsBuffer() {
 		for _, v := range this.FilterIndexList {
 			filter_op := argtype.OPC_FILTER_VALUE.NewValue(uint64(v))
 			op_list = append(op_list, filter_op.Index)

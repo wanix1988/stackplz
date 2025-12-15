@@ -22,6 +22,7 @@ const (
     SYSCALL_ENTER uint32 = iota + 456
     SYSCALL_EXIT
     UPROBE_ENTER
+    UPROBE_EXIT
     HW_BREAKPOINT
 )
 

@@ -39,7 +39,7 @@ func (this *UprobeEvent) ParseEvent() (IEventStruct, error) {
 }
 
 func (this *UprobeEvent) ParseContext() (err error) {
-    if this.EventId != UPROBE_ENTER {
+    if this.EventId != UPROBE_ENTER && this.EventId != UPROBE_EXIT {
         panic(fmt.Sprintf("UprobeEvent.ParseContext() failed, EventId:%d", this.EventId))
     }
 
@@ -60,13 +60,42 @@ func (this *UprobeEvent) ParseContext() (err error) {
     }
 
     var results []string
-    for _, point_arg := range this.uprobe_point.PointArgs {
-        var ptr argtype.Arg_reg
-        if err := binary.Read(this.buf, binary.LittleEndian, &ptr); err != nil {
-            panic(err)
+    if this.EventId == UPROBE_ENTER {
+        // 解析函数入口参数
+        // 完全按照 syscall enter 的方式：使用 binary.Read 直接读取 Arg_reg 结构体
+        // eBPF 保存格式：[index][value]，正好对应 Arg_reg 的 Index(uint8) + Address(uint64)
+        for _, point_arg := range this.uprobe_point.PointArgs {
+            var ptr argtype.Arg_reg
+            if err := binary.Read(this.buf, binary.LittleEndian, &ptr); err != nil {
+                // 读取失败，说明没有更多参数了
+                break
+            }
+            arg_fmt := point_arg.Parse(ptr.Address, this.buf, config.EBPF_UPROBE_ENTER)
+            results = append(results, fmt.Sprintf("%s=%s", point_arg.Name, arg_fmt))
         }
-        arg_fmt := point_arg.Parse(ptr.Address, this.buf, config.EBPF_UPROBE_ENTER)
-        results = append(results, fmt.Sprintf("%s=%s", point_arg.Name, arg_fmt))
+    } else if this.EventId == UPROBE_EXIT {
+        // 解析返回值：由 uretprobe_point_args 生成，ret 作为第一个“参数”写入 buffer
+        if this.uprobe_point.RetArg != nil {
+            var ret_reg argtype.Arg_reg
+            if err := binary.Read(this.buf, binary.LittleEndian, &ret_reg); err == nil {
+                ret_fmt := this.uprobe_point.RetArg.Parse(ret_reg.Address, this.buf, config.EBPF_UPROBE_EXIT)
+                results = append(results, fmt.Sprintf("%s=%s", this.uprobe_point.RetArg.Name, ret_fmt))
+            } else {
+                results = append(results, "ret=<unavailable>")
+            }
+        } else {
+            results = append(results, "ret=<unconfigured>")
+        }
+
+        // 解析入参（使用 entry 时保存的寄存器）
+        for _, point_arg := range this.uprobe_point.PointArgs {
+            var ptr argtype.Arg_reg
+            if err := binary.Read(this.buf, binary.LittleEndian, &ptr); err != nil {
+                break
+            }
+            arg_fmt := point_arg.Parse(ptr.Address, this.buf, config.EBPF_UPROBE_EXIT)
+            results = append(results, fmt.Sprintf("%s=%s", point_arg.Name, arg_fmt))
+        }
     }
     this.ArgStr = "(" + strings.Join(results, ", ") + ")"
     this.ParsePadding()
@@ -99,6 +128,10 @@ func (this *UprobeEvent) GetUUID() string {
 func (this *UprobeEvent) MarshalJSON() ([]byte, error) {
     type ContextAlias config.ContextFields
     type UprobeAlias config.UprobeFields
+    event_type := "uprobe"
+    if this.EventId == UPROBE_EXIT {
+        event_type = "uretprobe"
+    }
     return json.Marshal(&struct {
         Event string `json:"event"`
         LR    string `json:"lr"`
@@ -109,7 +142,7 @@ func (this *UprobeEvent) MarshalJSON() ([]byte, error) {
         *UprobeAlias
         Stack_str string `json:"stack_str"`
     }{
-        Event:        "uprobe",
+        Event:        event_type,
         LR:           fmt.Sprintf("0x%x", this.LR),
         SP:           fmt.Sprintf("0x%x", this.SP),
         PC:           fmt.Sprintf("0x%x", this.PC),
@@ -142,7 +175,11 @@ func (this *UprobeEvent) String() string {
     }
 
     var s string
-    s = fmt.Sprintf("[%s] %s%s %s %s SP:0x%x", this.GetUUID(), this.uprobe_point.Name, this.ArgStr, lr_str, pc_str, this.SP)
+    event_prefix := ""
+    if this.EventId == UPROBE_EXIT {
+        event_prefix = "[RET] "
+    }
+    s = fmt.Sprintf("[%s] %s%s%s %s %s SP:0x%x", this.GetUUID(), event_prefix, this.uprobe_point.Name, this.ArgStr, lr_str, pc_str, this.SP)
 
     return s + this.Stack_str
 }

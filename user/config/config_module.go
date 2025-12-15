@@ -337,18 +337,35 @@ func (this *StackUprobeConfig) Parse_HookPoint(configs []string) (err error) {
 
     // strstr+0x0[str,str] 命中 strstr + 0x0 时将x0和x1读取为字符串
     // write[int,buf:128,int] 命中 write 时将x0读取为int、x1读取为字节数组、x2读取为int
+    // strstr[str,str]r 启用uretprobe，在函数返回时捕获返回值
     for point_index, config_str := range configs {
         exit_read := false
         bind_syscall := false
-        if strings.HasSuffix(config_str, "]s") {
-            // 临时方案 将 uprobe 用法绑定到 syscall 上
-            config_str = config_str[:len(config_str)-1]
-            bind_syscall = true
+        enable_uretprobe := false
+        ret_type := ""
+        
+        // 先检查后缀：r/s/ss 是紧跟在参数 ']' 之后的单/双字符后缀
+        // 例如：getString[int,str]r / open[str,int]s / read[int,buf:64]ss
+        // 关键点：只能移除后缀字符，不能把用于参数解析的 ']' 一起移除
+        // 额外支持：]r<type> 用于指定返回值类型，例如 ]rstr / ]rstd
+        if idx := strings.LastIndex(config_str, "]r"); idx != -1 && idx+2 < len(config_str) {
+            // 形如 xxx]rstd / xxx]rstr
+            enable_uretprobe = true
+            ret_type = config_str[idx+2:]
+            config_str = config_str[:idx+1] // 保留 ']'
         }
-        if strings.HasSuffix(config_str, "]ss") {
+        if strings.HasSuffix(config_str, "ss") && strings.Contains(config_str, "]") {
             // 两个s表示对于sys_exit也要进行详细输出
-            config_str = config_str[:len(config_str)-2]
+            config_str = config_str[:len(config_str)-2] // 仅移除 "ss"
             exit_read = true
+            bind_syscall = true
+        } else if strings.HasSuffix(config_str, "r") && strings.Contains(config_str, "]") {
+            // 启用 uretprobe，在函数返回时捕获返回值
+            config_str = config_str[:len(config_str)-1] // 仅移除 "r"
+            enable_uretprobe = true
+        } else if strings.HasSuffix(config_str, "s") && strings.Contains(config_str, "]") {
+            // 临时方案 将 uprobe 用法绑定到 syscall 上
+            config_str = config_str[:len(config_str)-1] // 仅移除 "s"
             bind_syscall = true
         }
 
@@ -356,7 +373,8 @@ func (this *StackUprobeConfig) Parse_HookPoint(configs []string) (err error) {
         items := strings.Split(config_str, "]")
         if len(items) == 2 {
             config_str = items[0] + "]"
-            if items[1] != "" {
+            // 只有当 items[1] 不是空且不是特殊后缀时才解析为偏移
+            if items[1] != "" && items[1] != "r" && items[1] != "s" && items[1] != "ss" {
                 exit_read = true
                 exit_offset = util.StrToNum64(items[1])
             }
@@ -370,6 +388,8 @@ func (this *StackUprobeConfig) Parse_HookPoint(configs []string) (err error) {
             hook_point.BindSyscall = bind_syscall
             hook_point.ExitRead = exit_read
             hook_point.ExitOffset = exit_offset
+            hook_point.EnableUretprobe = enable_uretprobe
+            hook_point.RetType = ret_type
             hook_point.Index = uint32(point_index)
             hook_point.Offset = 0x0
             hook_point.LibPath = this.LibPath
@@ -406,8 +426,28 @@ func (this *StackUprobeConfig) Parse_HookPoint(configs []string) (err error) {
                     if err := this.ParseArgType(arg_str, point_arg); err != nil {
                         return err
                     }
+                        // 如果启用了 uretprobe：同一套参数需要在入口和返回处都能“读更多”（如 str/buf 的内容）
+                        // 复用已有的 EBPF_SYS_ALL 语义作为“对任意 point_type 都解析更多”的开关
+                        if enable_uretprobe {
+                            point_arg.SetPointType(EBPF_SYS_ALL)
+                        }
                     hook_point.PointArgs = append(hook_point.PointArgs, point_arg)
                 }
+            }
+
+            // uretprobe 返回值默认仅打印指针；如果指定了 ]rstr / ]rstd 则读取并打印内容
+            if enable_uretprobe {
+                ret_arg := NewUprobePointArg("ret", POINTER, 0)
+                ret_arg.IsRet = true
+                // 让 ret 在 uretprobe 时也能“读更多”（如字符串内容）
+                ret_arg.SetPointType(EBPF_SYS_ALL)
+                if ret_type != "" {
+                    // 复用现有 ParseArgType 解析返回值类型（支持 str/std/buf 等）
+                    if err := this.ParseArgType(ret_type, ret_arg); err != nil {
+                        return err
+                    }
+                }
+                hook_point.RetArg = ret_arg
             }
             this.Points = append(this.Points, hook_point)
         } else {
@@ -419,6 +459,10 @@ func (this *StackUprobeConfig) Parse_HookPoint(configs []string) (err error) {
         point := this.Points[point_idx]
         if point.ExitOffset != 0x0 {
             this.Points = append(this.Points, point.GetExitPoint(len(this.Points)))
+        }
+        // 如果启用了 uretprobe，设置 EnterKey 以便在 uprobe 入口时保存寄存器
+        if point.EnableUretprobe {
+            point.EnterKey = point.Index + 1
         }
     }
     return nil

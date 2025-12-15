@@ -7,20 +7,23 @@ import (
 )
 
 type UprobeArgs struct {
-	Index        uint32
-	EnterKey     uint32
-	LibPath      string
-	RealFilePath string
-	Name         string
-	Symbol       string
-	Offset       uint64
-	NonElfOffset uint64
-	ArgsStr      string
-	PointArgs    []*PointArg
-	BindSyscall  bool
-	ExitRead     bool
-	ExitOffset   uint64
-	KillSignal   uint32
+	Index           uint32
+	EnterKey        uint32
+	LibPath         string
+	RealFilePath    string
+	Name            string
+	Symbol          string
+	Offset          uint64
+	NonElfOffset    uint64
+	ArgsStr         string
+	PointArgs       []*PointArg
+	RetArg          *PointArg
+	RetType         string
+	BindSyscall     bool
+	ExitRead        bool
+	ExitOffset      uint64
+	KillSignal      uint32
+	EnableUretprobe bool
 }
 
 func (this *UprobeArgs) GetExitPoint(index int) *UprobeArgs {
@@ -50,6 +53,20 @@ func (this *UprobeArgs) GetConfig() UprobePointOpKeyConfig {
 		config.AddPointArg(point_arg)
 	}
 	// this.DumpOpList("uprobe_"+this.Name, config.OpKeyList[:])
+	return config
+}
+
+// GetUretConfig 为 uretprobe 生成配置：ret + 入参（用于打印返回值与参数）
+func (this *UprobeArgs) GetUretConfig() UprobePointOpKeyConfig {
+	config := UprobePointOpKeyConfig{}
+	config.EnterKey = this.EnterKey
+	config.Signal = this.KillSignal
+	if this.RetArg != nil {
+		config.AddPointArg(this.RetArg)
+	}
+	for _, point_arg := range this.PointArgs {
+		config.AddPointArg(point_arg)
+	}
 	return config
 }
 
