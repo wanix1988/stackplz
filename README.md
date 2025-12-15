@@ -69,6 +69,18 @@ stackplz的所有可用选项，可以通过`./stackplz --help`查看
 
 即uprobe hook，必须配合`-l/--lib`使用，具体用法参考后面的命令演示
 
+- -w/--point symbol/offset[type,type,...]r / -w/--point symbol/offset[type,type,...]r<rettype>
+
+即**uretprobe（返回点）** hook：在函数返回时输出`[RET]`行，并可解析返回值。
+
+`r`后缀说明：
+
+- `... ]r`：仅输出返回值**指针/数值**（`ret=0x...`），不做进一步解析
+- `... ]rstr`：返回值按`str`解析（适用于返回`char* / const char*`或能被当作C字符串读取的返回值）
+- `... ]rstd`：返回值按`std::string`解析（适用于常见 Android/libc++ 的 `std::string` 布局）
+
+注意：`r`是紧跟在参数`[]`之后的后缀（例如`getString[int,str]rstd`），不会改变参数列表的解析。
+
 2.3 **硬件断点相关选项**
 
 | 选项 | 默认值 | 说明 |
@@ -173,6 +185,31 @@ stackplz的所有可用选项，可以通过`./stackplz --help`查看
 ```
 
 ![](./images/Snipaste_2023-07-22_21-21-33.png)
+
+3.2.1 **uprobe + uretprobe：同时输出入口参数与返回值**
+
+```bash
+# 入口参数 + 返回值（仅指针/数值）
+./stackplz_arm64 -n com.example.testnative -l libnative-lib.so -w getString[int,str]r --stack
+
+# 返回值按 C 字符串解析（直接打印字符串内容）
+./stackplz_arm64 -n com.example.testnative -l libnative-lib.so -w getString[int,str]rstr --stack
+
+# 返回值按 std::string 解析（直接打印字符串内容）
+./stackplz_arm64 -n com.example.testnative -l libnative-lib.so -w getString[int,str]rstd --stack
+```
+
+输出示例（RET 行会带 `[RET]` 前缀）：
+
+```text
+[pid|tid|comm] getString(arg_0=42, arg_1=0x...(Hello from Kotlin)) ...
+[pid|tid|comm] [RET] getString(ret=0x...(Hello from Kotlin), arg_0=42, arg_1=0x...(Hello from Kotlin)) ...
+```
+
+使用提示：
+
+- C/C++ 符号可能被 name mangling（例如 `_Z...`），如果提示 `symbol not found`，请用实际符号名或偏移方式 `-w 0x...`
+- `rstd` 依赖常见 Android/libc++ 的 `std::string` 内存布局；若目标库实现不同，可改用 `r`/`rstr` 或改为偏移读取
 
 3.3 在命中uprobe hook时发送信号
 
