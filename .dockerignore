@@ -1,0 +1,12 @@
+bin/
+*.o
+*.so
+*.btf
+*.log
+.git/
+.DS_Store
+user/assets/*.o
+user/assets/*.btf
+user/assets/*_min.btf
+libbpf/
+

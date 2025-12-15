@@ -1,0 +1,22 @@
+services:
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 在 macOS 上，强制使用 linux/amd64 平台（因为 Android NDK 需要 x86_64）
+      platforms:
+        - linux/amd64
+    volumes:
+      # 挂载项目目录
+      - .:/workspace
+      # 挂载依赖目录到容器内的固定位置
+      - ../ebpf:/ebpf
+      - ../ebpfmanager:/ebpfmanager
+      # 挂载输出目录
+      - ./bin:/workspace/bin
+    environment:
+      - GOPROXY=https://goproxy.cn,direct
+      - GO111MODULE=on
+    working_dir: /workspace
+    command: /workspace/build_docker.sh
+
